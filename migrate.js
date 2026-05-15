@@ -1,6 +1,47 @@
 const db = require('./database');
 
 async function migrate() {
+  // Base tables (must exist before ALTER TABLE statements)
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(36) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        password VARCHAR(255) NULL,
+        role ENUM('CLIENT', 'PROFESSIONAL', 'ADMIN') NOT NULL DEFAULT 'CLIENT',
+        approval_status ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'PENDING',
+        phone VARCHAR(50) DEFAULT NULL,
+        avatar_url VARCHAR(500) DEFAULT NULL,
+        bio TEXT DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('users table ready');
+  } catch(e) { console.log(e.message); }
+
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS jobs (
+        id VARCHAR(36) PRIMARY KEY,
+        client_id VARCHAR(36) NOT NULL,
+        professional_id VARCHAR(36) DEFAULT NULL,
+        category VARCHAR(100) NOT NULL,
+        description TEXT NOT NULL,
+        address VARCHAR(500) DEFAULT NULL,
+        latitude DECIMAL(10,8) DEFAULT NULL,
+        longitude DECIMAL(11,8) DEFAULT NULL,
+        price DECIMAL(10,2) DEFAULT NULL,
+        status ENUM('PENDING','ACCEPTED','IN_PROGRESS','COMPLETED','CANCELLED') DEFAULT 'PENDING',
+        scheduled_date DATETIME DEFAULT NULL,
+        image_url VARCHAR(500) DEFAULT NULL,
+        payment_method VARCHAR(50) DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('jobs table ready');
+  } catch(e) { console.log(e.message); }
+
   // Original migrations
   try { await db.query('ALTER TABLE users ADD COLUMN password VARCHAR(255) NULL AFTER email'); } catch(e) { console.log(e.message); }
   try { await db.query('ALTER TABLE users MODIFY COLUMN role ENUM(\'CLIENT\', \'PROFESSIONAL\', \'ADMIN\') NOT NULL'); } catch(e) { console.log(e.message); }
