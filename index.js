@@ -1,5 +1,7 @@
 
 
+require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+
 const express = require('express');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
@@ -8,11 +10,10 @@ const multer = require('multer');
 const path = require('path');
 const { createWorker } = require('tesseract.js');
 const { parseMzBI } = require('./bi_parser');
-require('dotenv').config();
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, 'uploads/');
+    cb(null, path.join(__dirname, 'uploads'));
   },
   filename: (req, file, cb) => {
     cb(null, Date.now() + path.extname(file.originalname));
@@ -45,16 +46,18 @@ app.get('/api/jobs/nearby', async (req, res) => {
 
       // Fórmula de Haversine em SQL — calcula distância entre as coords do profissional e cada job
       const [rows] = await db.query(`
-        SELECT *,
-          (6371 * ACOS(
-            COS(RADIANS(?)) * COS(RADIANS(latitude)) * COS(RADIANS(longitude) - RADIANS(?)) +
-            SIN(RADIANS(?)) * SIN(RADIANS(latitude))
-          )) AS distance_km
-        FROM jobs
-        WHERE status = 'PENDING'
-          AND latitude IS NOT NULL
-          AND longitude IS NOT NULL
-        HAVING distance_km <= ?
+        SELECT * FROM (
+          SELECT *,
+            (6371 * ACOS(
+              COS(RADIANS(?)) * COS(RADIANS(latitude)) * COS(RADIANS(longitude) - RADIANS(?)) +
+              SIN(RADIANS(?)) * SIN(RADIANS(latitude))
+            )) AS distance_km
+          FROM jobs
+          WHERE status = 'PENDING'
+            AND latitude IS NOT NULL
+            AND longitude IS NOT NULL
+        ) AS sub
+        WHERE distance_km <= ?
         ORDER BY distance_km ASC
       `, [profLat, profLng, profLat, radiusKm]);
 
@@ -69,7 +72,7 @@ app.get('/api/jobs/nearby', async (req, res) => {
     }
 
     // Fallback sem localização: devolve todos os PENDING com distância simulada
-    const [rows] = await db.query('SELECT * FROM jobs WHERE status = "PENDING"');
+    const [rows] = await db.query("SELECT * FROM jobs WHERE status = 'PENDING'");
     const jobsWithVirtualDistance = rows.map(job => ({
       ...job,
       latitude: parseFloat(job.latitude),
@@ -120,7 +123,7 @@ app.get('/api/jobs/nearby', async (req, res) => {
 // 2. Cliente cria um novo pedido
 app.post('/api/jobs', upload.single('photo'), async (req, res) => {
   try {
-    const { client_id, category, description, address, latitude, longitude, price, scheduled_date, payment_method } = req.body;
+    const { client_id, category, description, address, latitude, longitude, price, scheduled_date, payment_method } = req.body || {};
     const jobId = uuidv4();
     let image_url = null;
 
@@ -138,8 +141,8 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
     const [newJob] = await db.query('SELECT * FROM jobs WHERE id = ?', [jobId]);
     res.status(201).json(newJob[0]);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Erro ao criar o pedido' });
+    console.error('POST /jobs error:', error);
+    res.status(500).json({ error: 'Erro ao criar o pedido', detail: error?.message || String(error) });
   }
 });
 
@@ -161,7 +164,7 @@ app.put('/api/jobs/:id/accept', async (req, res) => {
     }
 
     await db.query(
-      'UPDATE jobs SET status = "ACCEPTED", professional_id = ? WHERE id = ?',
+      "UPDATE jobs SET status = 'ACCEPTED', professional_id = ? WHERE id = ?",
       [professional_id, id]
     );
 
@@ -176,7 +179,7 @@ app.put('/api/jobs/:id/accept', async (req, res) => {
 app.put('/api/jobs/:id/complete', async (req, res) => {
   try {
     const { id } = req.params;
-    await db.query('UPDATE jobs SET status = "COMPLETED", completed_at = NOW() WHERE id = ?', [id]);
+    await db.query("UPDATE jobs SET status = 'COMPLETED', completed_at = NOW() WHERE id = ?", [id]);
     res.json({ message: 'Trabalho concluído com sucesso!' });
   } catch (error) {
     console.error(error);
@@ -191,7 +194,7 @@ app.put('/api/jobs/:id/start', async (req, res) => {
     const [jobCheck] = await db.query('SELECT status FROM jobs WHERE id = ?', [id]);
     if (jobCheck.length === 0) return res.status(404).json({ error: 'Trabalho não encontrado' });
     if (jobCheck[0].status !== 'ACCEPTED') return res.status(400).json({ error: 'O trabalho já foi iniciado ou não está aceite' });
-    await db.query('UPDATE jobs SET status = "IN_PROGRESS", started_at = NOW() WHERE id = ?', [id]);
+    await db.query("UPDATE jobs SET status = 'IN_PROGRESS', started_at = NOW() WHERE id = ?", [id]);
     res.json({ message: 'Trabalho iniciado!' });
   } catch (error) {
     console.error(error);
@@ -320,7 +323,7 @@ app.post('/api/jobs/:id/apply', async (req, res) => {
     );
     res.status(201).json({ message: 'Candidatura enviada com sucesso!', id: appId });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Já te candidataste a este pedido' });
+    if (error.code === '23505') return res.status(400).json({ error: 'Já te candidataste a este pedido' });
     console.error(error);
     res.status(500).json({ error: 'Erro ao enviar candidatura' });
   }
@@ -406,15 +409,15 @@ app.put('/api/jobs/:id/hire/:professionalId', async (req, res) => {
     const acceptedPrice = appRows.length > 0 ? appRows[0].proposed_price : null;
 
     await db.query(
-      'UPDATE jobs SET status = "ACCEPTED", professional_id = ?, price = COALESCE(?, price), hired_at = NOW() WHERE id = ?',
+      "UPDATE jobs SET status = 'ACCEPTED', professional_id = ?, price = COALESCE(?, price), hired_at = NOW() WHERE id = ?",
       [professionalId, acceptedPrice, id]
     );
     await db.query(
-      'UPDATE job_applications SET status = "ACCEPTED" WHERE job_id = ? AND professional_id = ?',
+      "UPDATE job_applications SET status = 'ACCEPTED' WHERE job_id = ? AND professional_id = ?",
       [id, professionalId]
     );
     await db.query(
-      'UPDATE job_applications SET status = "REJECTED" WHERE job_id = ? AND professional_id != ?',
+      "UPDATE job_applications SET status = 'REJECTED' WHERE job_id = ? AND professional_id != ?",
       [id, professionalId]
     );
 
@@ -453,7 +456,7 @@ app.post('/api/jobs/:id/recommend', async (req, res) => {
 
     res.status(201).json({ message: 'Profissional recomendado com sucesso!' });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Já recomendaste este profissional neste pedido' });
+    if (error.code === '23505') return res.status(400).json({ error: 'Já recomendaste este profissional neste pedido' });
     console.error(error);
     res.status(500).json({ error: 'Erro ao recomendar profissional' });
   }
@@ -498,7 +501,7 @@ app.post('/api/jobs/:id/review', upload.fields([{ name: 'before_photo', maxCount
 
     res.status(201).json({ message: 'Avaliação submetida com sucesso!' });
   } catch (error) {
-    if (error.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Já avaliaste este pedido' });
+    if (error.code === '23505') return res.status(400).json({ error: 'Já avaliaste este pedido' });
     console.error(error);
     res.status(500).json({ error: 'Erro ao submeter avaliação' });
   }

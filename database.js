@@ -1,19 +1,24 @@
-const mysql = require('mysql2');
+const { Pool } = require('pg');
 require('dotenv').config();
 
-const pool = process.env.MYSQL_URL
-  ? mysql.createPool(process.env.MYSQL_URL + '?waitForConnections=true&connectionLimit=10&queueLimit=0')
-  : mysql.createPool({
-      host: process.env.DB_HOST,
-      port: parseInt(process.env.DB_PORT) || 3306,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0
-    });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+});
 
-const promisePool = pool.promise();
+// Compatibility wrapper — mirrors mysql2's promise pool interface:
+//   db.query(sql, params) → [rows, resultInfo]
+// Automatically converts ? placeholders to $1, $2, ... for PostgreSQL.
+const db = {
+  async query(sql, params = []) {
+    let i = 0;
+    const pgSql = sql.replace(/\?/g, () => `$${++i}`);
+    const result = await pool.query(pgSql, params);
+    // Attach affectedRows so UPDATE/DELETE checks continue to work
+    const rows = result.rows;
+    rows.affectedRows = result.rowCount;
+    return [rows, result];
+  },
+};
 
-module.exports = promisePool;
+module.exports = db;

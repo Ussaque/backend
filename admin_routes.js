@@ -4,8 +4,8 @@ module.exports = function(app, db) {
     try {
       const [[userRows]] = await db.query('SELECT COUNT(*) as count FROM users');
       const [[jobRows]] = await db.query('SELECT COUNT(*) as count FROM jobs');
-      const [[pendingJobs]] = await db.query('SELECT COUNT(*) as count FROM jobs WHERE status = "PENDING"');
-      const [[revenueRows]] = await db.query('SELECT SUM(price) as total FROM jobs WHERE status = "COMPLETED"');
+      const [[pendingJobs]] = await db.query("SELECT COUNT(*) as count FROM jobs WHERE status = 'PENDING'");
+      const [[revenueRows]] = await db.query("SELECT SUM(price) as total FROM jobs WHERE status = 'COMPLETED'");
       res.json({
         totalUsers: userRows.count,
         totalJobs: jobRows.count,
@@ -154,6 +154,78 @@ module.exports = function(app, db) {
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: 'Erro ao eliminar pedido' });
+    }
+  });
+
+  // ======================================================
+  // CATEGORIAS DE SERVIÇO
+  // ======================================================
+
+  // Público: categorias activas (usa o cliente)
+  app.get('/api/categories', async (req, res) => {
+    try {
+      const [rows] = await db.query('SELECT * FROM categories WHERE active = TRUE ORDER BY order_index, name');
+      res.json(rows.map(r => ({ ...r, subcategories: r.subcategories ? JSON.parse(r.subcategories) : [] })));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Erro ao buscar categorias' });
+    }
+  });
+
+  // Admin: todas as categorias (incluindo inactivas)
+  app.get('/api/admin/categories', async (req, res) => {
+    try {
+      const [rows] = await db.query('SELECT * FROM categories ORDER BY order_index, name');
+      res.json(rows.map(r => ({ ...r, subcategories: r.subcategories ? JSON.parse(r.subcategories) : [] })));
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Erro ao buscar categorias' });
+    }
+  });
+
+  // Admin: criar categoria
+  app.post('/api/admin/categories', async (req, res) => {
+    try {
+      const { name, icon, color, subcategories, order_index } = req.body;
+      if (!name || !name.trim()) return res.status(400).json({ error: 'Nome obrigatório' });
+      const subsJson = JSON.stringify(Array.isArray(subcategories) ? subcategories : []);
+      await db.query(
+        'INSERT INTO categories (name, icon, color, subcategories, order_index) VALUES (?, ?, ?, ?, ?)',
+        [name.trim(), icon || '🔧', color || '#6C63FF', subsJson, order_index || 0]
+      );
+      res.json({ message: 'Categoria criada' });
+    } catch (error) {
+      console.error(error);
+      if (error.code === '23505') return res.status(400).json({ error: 'Já existe uma categoria com esse nome' });
+      res.status(500).json({ error: 'Erro ao criar categoria' });
+    }
+  });
+
+  // Admin: editar categoria
+  app.put('/api/admin/categories/:id', async (req, res) => {
+    try {
+      const { name, icon, color, subcategories, active, order_index } = req.body;
+      const subsJson = JSON.stringify(Array.isArray(subcategories) ? subcategories : []);
+      await db.query(
+        'UPDATE categories SET name=?, icon=?, color=?, subcategories=?, active=?, order_index=? WHERE id=?',
+        [name, icon, color, subsJson, active !== undefined ? active : true, order_index || 0, req.params.id]
+      );
+      res.json({ message: 'Categoria atualizada' });
+    } catch (error) {
+      console.error(error);
+      if (error.code === '23505') return res.status(400).json({ error: 'Já existe uma categoria com esse nome' });
+      res.status(500).json({ error: 'Erro ao atualizar categoria' });
+    }
+  });
+
+  // Admin: eliminar categoria
+  app.delete('/api/admin/categories/:id', async (req, res) => {
+    try {
+      await db.query('DELETE FROM categories WHERE id = ?', [req.params.id]);
+      res.json({ message: 'Categoria eliminada' });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: 'Erro ao eliminar categoria' });
     }
   });
 };
