@@ -8,19 +8,30 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('./database');
 const multer = require('multer');
 const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
 const { createWorker } = require('tesseract.js');
 const { parseMzBI } = require('./bi_parser');
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, 'uploads'));
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
-});
+// Supabase Storage client
+const supabase = createClient(
+  process.env.SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+);
 
-const upload = multer({ storage });
+// Multer: guarda em memória para depois enviar ao Supabase Storage
+const upload = multer({ storage: multer.memoryStorage() });
+
+// Helper: faz upload para Supabase Storage e devolve URL pública
+async function uploadToStorage(file) {
+  const ext = path.extname(file.originalname);
+  const filename = `${Date.now()}-${uuidv4()}${ext}`;
+  const { error } = await supabase.storage
+    .from('uploads')
+    .upload(filename, file.buffer, { contentType: file.mimetype, upsert: false });
+  if (error) throw error;
+  const { data } = supabase.storage.from('uploads').getPublicUrl(filename);
+  return data.publicUrl;
+}
 
 const app = express();
 
@@ -128,7 +139,7 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
     let image_url = null;
 
     if (req.file) {
-      image_url = `/uploads/${req.file.filename}`;
+      image_url = await uploadToStorage(req.file);
     }
 
     const query = `
@@ -481,8 +492,8 @@ app.post('/api/jobs/:id/review', upload.fields([{ name: 'before_photo', maxCount
 
     const beforeFile = req.files?.before_photo?.[0];
     const afterFile = req.files?.after_photo?.[0];
-    const beforeUrl = beforeFile ? 'uploads/' + beforeFile.filename : null;
-    const afterUrl = afterFile ? 'uploads/' + afterFile.filename : null;
+    const beforeUrl = beforeFile ? await uploadToStorage(beforeFile) : null;
+    const afterUrl = afterFile ? await uploadToStorage(afterFile) : null;
 
     await db.query(
       'INSERT INTO reviews (id, job_id, reviewer_id, professional_id, rating, comment, before_photo_url, after_photo_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -580,7 +591,7 @@ app.get('/api/users/:id/profile', async (req, res) => {
 
 // Upload de certificado PDF
 const uploadPdf = multer({
-  storage,
+  storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'application/pdf') cb(null, true);
     else cb(new Error('Apenas ficheiros PDF são aceites'), false);
@@ -590,7 +601,7 @@ const uploadPdf = multer({
 app.post('/api/users/:id/cert-pdf', uploadPdf.single('cert_pdf'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum ficheiro enviado' });
-    const certUrl = 'uploads/' + req.file.filename;
+    const certUrl = await uploadToStorage(req.file);
     await db.query('UPDATE users SET cert_pdf_url = ? WHERE id = ?', [certUrl, req.params.id]);
     res.json({ cert_pdf_url: certUrl });
   } catch (error) {
@@ -600,7 +611,7 @@ app.post('/api/users/:id/cert-pdf', uploadPdf.single('cert_pdf'), async (req, re
 });
 
 // Digitalização de BI (frente + verso) com OCR
-const uploadBiFields = multer({ storage }).fields([
+const uploadBiFields = multer({ storage: multer.memoryStorage() }).fields([
   { name: 'bi_front', maxCount: 1 },
   { name: 'bi_back',  maxCount: 1 },
 ]);
@@ -610,8 +621,8 @@ app.post('/api/users/:id/bi-scan', uploadBiFields, async (req, res) => {
   const backFile  = req.files?.bi_back?.[0];
   if (!frontFile) return res.status(400).json({ error: 'Foto da frente do BI é obrigatória' });
 
-  const frontUrl = 'uploads/' + frontFile.filename;
-  const backUrl  = backFile ? 'uploads/' + backFile.filename : null;
+  const frontUrl = await uploadToStorage(frontFile);
+  const backUrl  = backFile ? await uploadToStorage(backFile) : null;
 
   // Guardar URLs das fotos imediatamente
   await db.query(
@@ -622,10 +633,10 @@ app.post('/api/users/:id/bi-scan', uploadBiFields, async (req, res) => {
   try {
     // OCR na frente (onde estão os dados pessoais)
     const worker = await createWorker(['por', 'eng']);
-    const { data: { text: frontText } } = await worker.recognize(frontFile.path);
+    const { data: { text: frontText } } = await worker.recognize(frontFile.buffer);
     let allText = frontText;
     if (backFile) {
-      const { data: { text: backText } } = await worker.recognize(backFile.path);
+      const { data: { text: backText } } = await worker.recognize(backFile.buffer);
       allText += '\n' + backText;
     }
     await worker.terminate();
@@ -659,7 +670,7 @@ app.post('/api/users/:id/bi-scan', uploadBiFields, async (req, res) => {
     res.json({
       success: false,
       bi_front_url: frontUrl,
-      bi_back_url:  backUrl,
+      bi_back_url: backUrl,
       extracted: {},
       warning: 'Não foi possível ler os dados automaticamente. Por favor preenche manualmente.',
     });
@@ -670,7 +681,7 @@ app.post('/api/users/:id/bi-scan', uploadBiFields, async (req, res) => {
 app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Nenhum ficheiro enviado' });
-    const avatarUrl = 'uploads/' + req.file.filename;
+    const avatarUrl = await uploadToStorage(req.file);
     await db.query('UPDATE users SET avatar_url = ? WHERE id = ?', [avatarUrl, req.params.id]);
     res.json({ avatar_url: avatarUrl });
   } catch (error) {
@@ -695,7 +706,7 @@ app.post('/api/users/:id/portfolio', upload.array('photos', 6), async (req, res)
     const inserted = [];
     for (const file of req.files) {
       const photoId = uuidv4();
-      const photoUrl = 'uploads/' + file.filename;
+      const photoUrl = await uploadToStorage(file);
       await db.query(
         'INSERT INTO portfolio_photos (id, user_id, photo_url) VALUES (?, ?, ?)',
         [photoId, userId, photoUrl]
