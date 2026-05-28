@@ -139,7 +139,12 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
     let image_url = null;
 
     if (req.file) {
-      image_url = await uploadToStorage(req.file);
+      try {
+        image_url = await uploadToStorage(req.file);
+      } catch (uploadErr) {
+        console.error('Upload para Supabase falhou:', uploadErr?.message || uploadErr);
+        // Continua sem imagem em vez de retornar 500
+      }
     }
 
     const query = `
