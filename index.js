@@ -35,6 +35,16 @@ async function uploadToStorage(file) {
 
 const app = express();
 
+// Run lightweight migrations on startup (PostgreSQL-safe)
+(async () => {
+  try {
+    await db.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS is_available BOOLEAN DEFAULT TRUE');
+    console.log('Migration: is_available column ready');
+  } catch (e) {
+    console.log('Migration note:', e.message);
+  }
+})();
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Middlewares
