@@ -991,7 +991,7 @@ app.post('/api/users/:id/portfolio', upload.array('photos', 6), async (req, res)
     const userId = req.params.id;
 
     // Verificar quantas fotos já tem
-    const [existing] = await db.query('SELECT COUNT(*) as count FROM portfolio_photos WHERE user_id = ?', [userId]);
+    const [existing] = await db.query('SELECT COUNT(*)::int as count FROM portfolio_photos WHERE user_id = ?', [userId]);
     const currentCount = existing[0].count;
     if (currentCount + req.files.length > 6) {
       return res.status(400).json({ error: `Só podes ter no máximo 6 fotos. Tens ${currentCount} e estás a tentar adicionar ${req.files.length}.` });
