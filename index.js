@@ -203,7 +203,7 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
 });
 
 // Pedido de serviço directo a um profissional específico
-app.post('/api/jobs/direct-hire', async (req, res) => {
+app.post('/api/jobs/direct-hire', upload.single('photo'), async (req, res) => {
   try {
     const { client_id, professional_id, category, service_type, description, payment_method, scheduled_date, address } = req.body || {};
     if (!client_id || !professional_id || !category || !description) {
@@ -219,11 +219,20 @@ app.post('/api/jobs/direct-hire', async (req, res) => {
 
     const jobId = uuidv4();
     const fullDescription = service_type ? `[${service_type}] ${description}` : description;
+    let image_url = null;
+
+    if (req.file) {
+      try {
+        image_url = await uploadToStorage(req.file);
+      } catch (uploadErr) {
+        console.error('Upload foto direct-hire falhou:', uploadErr?.message || uploadErr);
+      }
+    }
 
     await db.query(
-      `INSERT INTO jobs (id, client_id, professional_id, category, description, address, payment_method, scheduled_date, status, hired_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACCEPTED', NOW())`,
-      [jobId, client_id, professional_id, category, fullDescription, address || 'Não especificado', payment_method || '', scheduled_date || null]
+      `INSERT INTO jobs (id, client_id, professional_id, category, description, address, payment_method, scheduled_date, status, hired_at, image_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACCEPTED', NOW(), ?)`,
+      [jobId, client_id, professional_id, category, fullDescription, address || 'Não especificado', payment_method || '', scheduled_date || null, image_url]
     );
 
     // Notificar o profissional do pedido directo
