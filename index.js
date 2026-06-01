@@ -43,7 +43,37 @@ const app = express();
   } catch (e) {
     console.log('Migration note:', e.message);
   }
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        type VARCHAR(50) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        body TEXT,
+        job_id UUID REFERENCES jobs(id) ON DELETE SET NULL,
+        is_read BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await db.query('CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC)');
+    console.log('Migration: notifications table ready');
+  } catch (e) {
+    console.log('Migration note:', e.message);
+  }
 })();
+
+// Helper: cria uma notificação (fire-and-forget, não bloqueia a resposta)
+async function notify(userId, type, title, body, jobId = null) {
+  try {
+    await db.query(
+      'INSERT INTO notifications (user_id, type, title, body, job_id) VALUES (?, ?, ?, ?, ?)',
+      [userId, type, title, body, jobId]
+    );
+  } catch (e) {
+    console.error('notify error:', e.message);
+  }
+}
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -206,6 +236,19 @@ app.put('/api/jobs/:id/complete', async (req, res) => {
   try {
     const { id } = req.params;
     await db.query("UPDATE jobs SET status = 'COMPLETED', completed_at = NOW() WHERE id = ?", [id]);
+
+    // Notificar cliente
+    const [jInfo] = await db.query('SELECT client_id, title FROM jobs WHERE id = ?', [id]);
+    if (jInfo.length > 0) {
+      notify(
+        jInfo[0].client_id,
+        'JOB_COMPLETED',
+        'Trabalho concluído! ✅',
+        `O profissional marcou "${jInfo[0].title || 'o pedido'}" como concluído. Avalia o serviço!`,
+        id
+      );
+    }
+
     res.json({ message: 'Trabalho concluído com sucesso!' });
   } catch (error) {
     console.error(error);
@@ -352,6 +395,20 @@ app.post('/api/jobs/:id/apply', async (req, res) => {
       'INSERT INTO job_applications (id, job_id, professional_id, message, proposed_price) VALUES (?, ?, ?, ?, ?)',
       [appId, id, professional_id, message || null, proposed_price ? parseFloat(proposed_price) : null]
     );
+
+    // Notificar cliente
+    const [jobInfo] = await db.query('SELECT client_id, title FROM jobs WHERE id = ?', [id]);
+    const [proInfo] = await db.query('SELECT name FROM users WHERE id = ?', [professional_id]);
+    if (jobInfo.length > 0 && proInfo.length > 0) {
+      notify(
+        jobInfo[0].client_id,
+        'NEW_APPLICANT',
+        'Novo candidato! 👤',
+        `${proInfo[0].name} candidatou-se ao teu pedido “${jobInfo[0].title || 'sem título'}”.`,
+        id
+      );
+    }
+
     res.status(201).json({ message: 'Candidatura enviada com sucesso!', id: appId });
   } catch (error) {
     if (error.code === '23505') return res.status(400).json({ error: 'Já te candidataste a este pedido' });
@@ -451,6 +508,31 @@ app.put('/api/jobs/:id/hire/:professionalId', async (req, res) => {
       "UPDATE job_applications SET status = 'REJECTED' WHERE job_id = ? AND professional_id != ?",
       [id, professionalId]
     );
+
+    // Notificar profissional contratado
+    const [jInfo] = await db.query('SELECT title, client_id FROM jobs WHERE id = ?', [id]);
+    notify(
+      professionalId,
+      'HIRED',
+      'Foste contratado! 🎉',
+      `O cliente aceitou a tua candidatura para “${jInfo[0]?.title || 'pedido'}”.`,
+      id
+    );
+
+    // Notificar profissionais rejeitados
+    const [rejected] = await db.query(
+      "SELECT professional_id FROM job_applications WHERE job_id = ? AND status = 'REJECTED'",
+      [id]
+    );
+    for (const r of rejected) {
+      notify(
+        r.professional_id,
+        'REJECTED',
+        'Candidatura não selecionada',
+        `O cliente escolheu outro profissional para “${jInfo[0]?.title || 'o pedido'}”.`,
+        id
+      );
+    }
 
     res.json({ message: 'Profissional contratado com sucesso!' });
   } catch (error) {
@@ -676,6 +758,42 @@ app.get('/api/users/:id/reviews', async (req, res) => {
 });
 
 require('./admin_routes')(app, db);
+
+// ==========================================
+// NOTIFICAÇÕES
+// ==========================================
+
+app.get('/api/notifications/:userId', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT id, type, title, body, job_id, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
+      [req.params.userId]
+    );
+    const unread = rows.filter(n => !n.is_read).length;
+    res.json({ notifications: rows, unread });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao buscar notificações' });
+  }
+});
+
+app.put('/api/notifications/:id/read', async (req, res) => {
+  try {
+    await db.query('UPDATE notifications SET is_read = TRUE WHERE id = ?', [req.params.id]);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro' });
+  }
+});
+
+app.put('/api/notifications/read-all/:userId', async (req, res) => {
+  try {
+    await db.query('UPDATE notifications SET is_read = TRUE WHERE user_id = ?', [req.params.userId]);
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Erro' });
+  }
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
