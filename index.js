@@ -342,6 +342,11 @@ app.post('/api/jobs/:id/apply', async (req, res) => {
     if (jobCheck.length === 0) return res.status(404).json({ error: 'Pedido não encontrado' });
     if (jobCheck[0].status !== 'PENDING') return res.status(400).json({ error: 'Este pedido já não aceita candidaturas' });
 
+    // Verificar se o profissional está disponível
+    const [profCheck] = await db.query('SELECT is_available FROM users WHERE id = ?', [professional_id]);
+    if (profCheck.length === 0) return res.status(404).json({ error: 'Profissional não encontrado' });
+    if (!profCheck[0].is_available) return res.status(400).json({ error: 'Não estás disponível para aceitar novos pedidos' });
+
     const appId = uuidv4();
     await db.query(
       'INSERT INTO job_applications (id, job_id, professional_id, message, proposed_price) VALUES (?, ?, ?, ?, ?)',
@@ -537,7 +542,7 @@ app.post('/api/jobs/:id/review', upload.fields([{ name: 'before_photo', maxCount
 app.get('/api/professionals', async (req, res) => {
   try {
     const { specialty, province, min_rating, q } = req.query;
-    const conditions = ["role = 'PROFESSIONAL'", "approval_status = 'APPROVED'"];
+    const conditions = ["role = 'PROFESSIONAL'", "approval_status = 'APPROVED'", "is_available = true"];
     const params = [];
 
     if (q && q.trim()) {
