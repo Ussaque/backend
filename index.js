@@ -238,13 +238,13 @@ app.put('/api/jobs/:id/complete', async (req, res) => {
     await db.query("UPDATE jobs SET status = 'COMPLETED', completed_at = NOW() WHERE id = ?", [id]);
 
     // Notificar cliente
-    const [jInfo] = await db.query('SELECT client_id, title FROM jobs WHERE id = ?', [id]);
+    const [jInfo] = await db.query('SELECT client_id, category FROM jobs WHERE id = ?', [id]);
     if (jInfo.length > 0) {
       notify(
         jInfo[0].client_id,
         'JOB_COMPLETED',
         'Trabalho concluído! ✅',
-        `O profissional marcou "${jInfo[0].title || 'o pedido'}" como concluído. Avalia o serviço!`,
+        `O profissional marcou "${jInfo[0].category || 'o pedido'}" como concluído. Avalia o serviço!`,
         id
       );
     }
@@ -397,7 +397,7 @@ app.post('/api/jobs/:id/apply', async (req, res) => {
     );
 
     // Notificar cliente
-    const [jobInfo] = await db.query('SELECT client_id, title FROM jobs WHERE id = ?', [id]);
+    const [jobInfo] = await db.query('SELECT client_id, category FROM jobs WHERE id = ?', [id]);
     const [proInfo] = await db.query('SELECT name FROM users WHERE id = ?', [professional_id]);
     if (jobInfo.length > 0 && proInfo.length > 0) {
       notify(
