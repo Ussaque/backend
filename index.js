@@ -127,8 +127,8 @@ app.get('/api/jobs/nearby', async (req, res) => {
       delete user.password;
       res.json(user);
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: 'Erro no login' });
+      console.error('LOGIN ERROR:', error.message, error.code);
+      res.status(500).json({ error: 'Erro no login', detail: error.message, code: error.code });
     }
   });
 // 2. Cliente cria um novo pedido
