@@ -523,6 +523,143 @@ app.post('/api/jobs/:id/review', upload.fields([{ name: 'before_photo', maxCount
   }
 });
 
+// Pesquisa de profissionais aprovados com filtros
+app.get('/api/professionals', async (req, res) => {
+  try {
+    const { specialty, province, min_rating, q } = req.query;
+    const conditions = ["role = 'PROFESSIONAL'", "approval_status = 'APPROVED'"];
+    const params = [];
+
+    if (q && q.trim()) {
+      conditions.push('(name LIKE ? OR specialty LIKE ?)');
+      params.push(`%${q.trim()}%`, `%${q.trim()}%`);
+    }
+    if (specialty && specialty.trim()) {
+      conditions.push('specialty LIKE ?');
+      params.push(`%${specialty.trim()}%`);
+    }
+    if (province && province.trim()) {
+      conditions.push('province = ?');
+      params.push(province.trim());
+    }
+    if (min_rating) {
+      conditions.push('rating >= ?');
+      params.push(parseFloat(min_rating));
+    }
+
+    const sql = `SELECT id, name, avatar_url, specialty, experience_years, province, rating, rating_count, bio, recommendation_count, verified_skills FROM users WHERE ${conditions.join(' AND ')} ORDER BY rating DESC, rating_count DESC LIMIT 50`;
+    const [rows] = await db.query(sql, params);
+    res.json(rows.map(r => ({ ...r, verified_skills: r.verified_skills ? JSON.parse(r.verified_skills) : [] })));
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao pesquisar profissionais' });
+  }
+});
+
+// Toggle disponibilidade do profissional
+app.put('/api/users/:id/availability', async (req, res) => {
+  try {
+    const { is_available } = req.body;
+    await db.query('UPDATE users SET is_available = ? WHERE id = ?', [is_available ? 1 : 0, req.params.id]);
+    res.json({ is_available: !!is_available });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao actualizar disponibilidade' });
+  }
+});
+
+// Ganhos do profissional (sumário + histórico)
+app.get('/api/users/:id/earnings', async (req, res) => {
+  try {
+    const { period } = req.query; // 'today' | 'week' | 'month' | 'all'
+    const id = req.params.id;
+
+    let dateFilter = '';
+    if (period === 'today')  dateFilter = 'AND DATE(j.completed_at) = CURDATE()';
+    else if (period === 'week')  dateFilter = 'AND j.completed_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)';
+    else if (period === 'month') dateFilter = 'AND j.completed_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
+
+    const [jobs] = await db.query(
+      `SELECT j.id, j.category, j.price, j.completed_at, j.address,
+              u.name as client_name
+       FROM jobs j
+       LEFT JOIN users u ON j.client_id = u.id
+       WHERE j.professional_id = ? AND j.status = 'COMPLETED' ${dateFilter}
+       ORDER BY j.completed_at DESC`,
+      [id]
+    );
+
+    const [stats] = await db.query(
+      `SELECT
+         COUNT(*) as total_jobs,
+         COALESCE(SUM(price), 0) as total_earned,
+         COALESCE(SUM(CASE WHEN DATE(completed_at) = CURDATE() THEN price ELSE 0 END), 0) as today_earned,
+         COALESCE(SUM(CASE WHEN completed_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) THEN price ELSE 0 END), 0) as week_earned,
+         COALESCE(SUM(CASE WHEN completed_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN price ELSE 0 END), 0) as month_earned
+       FROM jobs
+       WHERE professional_id = ? AND status = 'COMPLETED'`,
+      [id]
+    );
+
+    // Pedidos pendentes (candidaturas HIRED ou IN_PROGRESS)
+    const [pending] = await db.query(
+      `SELECT j.id, j.category, j.address, j.price, j.status, j.scheduled_date, j.created_at,
+              u.name as client_name
+       FROM jobs j
+       LEFT JOIN users u ON j.client_id = u.id
+       WHERE j.professional_id = ? AND j.status IN ('ACCEPTED','IN_PROGRESS')
+       ORDER BY j.scheduled_date ASC, j.created_at DESC`,
+      [id]
+    );
+
+    res.json({ stats: stats[0], jobs, pending });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao buscar ganhos' });
+  }
+});
+
+// Agenda semanal (serviços confirmados por data)
+app.get('/api/users/:id/schedule', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT j.id, j.category, j.address, j.price, j.status, j.scheduled_date,
+              u.name as client_name, u.telefone as client_phone
+       FROM jobs j
+       LEFT JOIN users u ON j.client_id = u.id
+       WHERE j.professional_id = ?
+         AND j.status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED')
+         AND j.scheduled_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+       ORDER BY j.scheduled_date ASC`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao buscar agenda' });
+  }
+});
+
+// Avaliações recebidas por um profissional
+app.get('/api/users/:id/reviews', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT r.id, r.rating, r.comment, r.before_photo_url, r.after_photo_url, r.created_at,
+              u.name as reviewer_name, u.avatar_url as reviewer_avatar
+       FROM reviews r
+       JOIN users u ON r.reviewer_id = u.id
+       WHERE r.professional_id = ?
+       ORDER BY r.created_at DESC
+       LIMIT 30`,
+      [req.params.id]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao buscar avaliações' });
+  }
+});
+
 require('./admin_routes')(app, db);
 
 const PORT = process.env.PORT || 3000;
@@ -580,7 +717,7 @@ app.post('/api/professionals/profile', async (req, res) => {
 app.get('/api/users/:id/profile', async (req, res) => {
   try {
     const [rows] = await db.query(
-      'SELECT id, name, email, role, avatar_url, rating, rating_count, specialty, experience_years, province, bairro, verified_skills, institution, course_name, graduation_year, is_student, cert_pdf_url, bio, recommendation_count, approval_status, rejection_reason, bi, telefone, date_of_birth, gender, bi_front_url, bi_back_url FROM users WHERE id = ?',
+      'SELECT id, name, email, role, avatar_url, rating, rating_count, specialty, experience_years, province, bairro, verified_skills, institution, course_name, graduation_year, is_student, cert_pdf_url, bio, recommendation_count, approval_status, rejection_reason, bi, telefone, date_of_birth, gender, bi_front_url, bi_back_url, is_available FROM users WHERE id = ?',
       [req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Utilizador não encontrado' });

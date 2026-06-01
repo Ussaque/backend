@@ -158,6 +158,9 @@ async function migrate() {
   try { await db.query("ALTER TABLE users ADD COLUMN date_of_birth DATE DEFAULT NULL"); } catch(e) { console.log(e.message); }
   try { await db.query("ALTER TABLE users ADD COLUMN gender ENUM('M','F') DEFAULT NULL"); } catch(e) { console.log(e.message); }
 
+  // Professional availability toggle
+  try { await db.query("ALTER TABLE users ADD COLUMN is_available TINYINT(1) DEFAULT 1"); } catch(e) { console.log(e.message); }
+
   console.log('Done');
   process.exit(0);
 }
