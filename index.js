@@ -293,7 +293,7 @@ app.get('/api/users/:userId/jobs', async (req, res) => {
     const [rows] = await db.query(
       `SELECT j.*,
               u.name as proName,
-              (SELECT COUNT(*) FROM recommendations r WHERE r.job_id = j.id) as has_recommendation
+              (SELECT COUNT(*)::int FROM recommendations r WHERE r.job_id = j.id) as has_recommendation
        FROM jobs j
        LEFT JOIN users u ON j.professional_id = u.id
        WHERE j.client_id = ?
