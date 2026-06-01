@@ -202,6 +202,47 @@ app.post('/api/jobs', upload.single('photo'), async (req, res) => {
   }
 });
 
+// Pedido de serviço directo a um profissional específico
+app.post('/api/jobs/direct-hire', async (req, res) => {
+  try {
+    const { client_id, professional_id, category, service_type, description, payment_method, scheduled_date, address } = req.body || {};
+    if (!client_id || !professional_id || !category || !description) {
+      return res.status(400).json({ error: 'client_id, professional_id, category e description são obrigatórios' });
+    }
+
+    // Verificar se o profissional existe e está aprovado
+    const [profRows] = await db.query('SELECT id, approval_status FROM users WHERE id = ? AND role = ?', [professional_id, 'professional']);
+    if (!profRows.length) return res.status(404).json({ error: 'Profissional não encontrado' });
+    if (profRows[0].approval_status !== 'APPROVED') {
+      return res.status(400).json({ error: 'Este profissional ainda não está disponível para pedidos.' });
+    }
+
+    const jobId = uuidv4();
+    const fullDescription = service_type ? `[${service_type}] ${description}` : description;
+
+    await db.query(
+      `INSERT INTO jobs (id, client_id, professional_id, category, description, address, payment_method, scheduled_date, status, hired_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ACCEPTED', NOW())`,
+      [jobId, client_id, professional_id, category, fullDescription, address || 'Não especificado', payment_method || '', scheduled_date || null]
+    );
+
+    // Notificar o profissional do pedido directo
+    notify(
+      professional_id,
+      'HIRED',
+      'Novo pedido directo! 🎉',
+      `Um cliente pediu os teus serviços de "${category}" directamente. Verifica os detalhes!`,
+      jobId
+    );
+
+    const [newJob] = await db.query('SELECT * FROM jobs WHERE id = ?', [jobId]);
+    res.status(201).json(newJob[0]);
+  } catch (error) {
+    console.error('POST /jobs/direct-hire error:', error);
+    res.status(500).json({ error: 'Erro ao criar pedido directo', detail: error?.message || String(error) });
+  }
+});
+
 // 3. Profissional aceita um pedido (Muda o Status)
 app.put('/api/jobs/:id/accept', async (req, res) => {
   try {
