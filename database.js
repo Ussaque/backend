@@ -1,23 +1,21 @@
-const { Pool } = require('pg');
+const mysql = require('mysql2/promise');
 require('dotenv').config();
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+const pool = mysql.createPool({
+  host: process.env.MYSQL_HOST,
+  port: parseInt(process.env.MYSQL_PORT || '3306', 10),
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  database: process.env.MYSQL_DATABASE,
+  waitForConnections: true,
+  connectionLimit: 10,
 });
 
-// Compatibility wrapper — mirrors mysql2's promise pool interface:
-//   db.query(sql, params) → [rows, resultInfo]
-// Automatically converts ? placeholders to $1, $2, ... for PostgreSQL.
+// Thin wrapper that keeps the same db.query(sql, params) → [rows, result] interface.
+// MySQL2 already uses ? placeholders, so no conversion is needed.
 const db = {
   async query(sql, params = []) {
-    let i = 0;
-    const pgSql = sql.replace(/\?/g, () => `$${++i}`);
-    const result = await pool.query(pgSql, params);
-    // Attach affectedRows so UPDATE/DELETE checks continue to work
-    const rows = result.rows;
-    rows.affectedRows = result.rowCount;
-    return [rows, result];
+    return pool.query(sql, params);
   },
 };
 
