@@ -585,9 +585,9 @@ app.get('/api/users/:id/earnings', async (req, res) => {
     const id = req.params.id;
 
     let dateFilter = '';
-    if (period === 'today')  dateFilter = 'AND DATE(j.completed_at) = CURDATE()';
-    else if (period === 'week')  dateFilter = 'AND j.completed_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)';
-    else if (period === 'month') dateFilter = 'AND j.completed_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)';
+    if (period === 'today')  dateFilter = "AND DATE(j.completed_at) = CURRENT_DATE";
+    else if (period === 'week')  dateFilter = "AND j.completed_at >= CURRENT_DATE - INTERVAL '7 days'";
+    else if (period === 'month') dateFilter = "AND j.completed_at >= CURRENT_DATE - INTERVAL '30 days'";
 
     const [jobs] = await db.query(
       `SELECT j.id, j.category, j.price, j.completed_at, j.address,
@@ -603,9 +603,9 @@ app.get('/api/users/:id/earnings', async (req, res) => {
       `SELECT
          COUNT(*) as total_jobs,
          COALESCE(SUM(price), 0) as total_earned,
-         COALESCE(SUM(CASE WHEN DATE(completed_at) = CURDATE() THEN price ELSE 0 END), 0) as today_earned,
-         COALESCE(SUM(CASE WHEN completed_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY) THEN price ELSE 0 END), 0) as week_earned,
-         COALESCE(SUM(CASE WHEN completed_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN price ELSE 0 END), 0) as month_earned
+         COALESCE(SUM(CASE WHEN DATE(completed_at) = CURRENT_DATE THEN price ELSE 0 END), 0) as today_earned,
+         COALESCE(SUM(CASE WHEN completed_at >= CURRENT_DATE - INTERVAL '7 days' THEN price ELSE 0 END), 0) as week_earned,
+         COALESCE(SUM(CASE WHEN completed_at >= CURRENT_DATE - INTERVAL '30 days' THEN price ELSE 0 END), 0) as month_earned
        FROM jobs
        WHERE professional_id = ? AND status = 'COMPLETED'`,
       [id]
@@ -639,7 +639,7 @@ app.get('/api/users/:id/schedule', async (req, res) => {
        LEFT JOIN users u ON j.client_id = u.id
        WHERE j.professional_id = ?
          AND j.status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED')
-         AND j.scheduled_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+         AND j.scheduled_date >= CURRENT_DATE - INTERVAL '7 days'
        ORDER BY j.scheduled_date ASC`,
       [req.params.id]
     );
@@ -727,7 +727,7 @@ app.post('/api/professionals/profile', async (req, res) => {
 app.get('/api/users/:id/profile', async (req, res) => {
   try {
     const [rows] = await db.query(
-      'SELECT id, name, email, role, avatar_url, rating, rating_count, specialty, experience_years, province, bairro, verified_skills, institution, course_name, graduation_year, is_student, cert_pdf_url, bio, recommendation_count, approval_status, rejection_reason, bi, telefone, date_of_birth, gender, bi_front_url, bi_back_url, is_available FROM users WHERE id = ?',
+      'SELECT id, name, email, role, avatar_url, rating, rating_count, specialty, experience_years, province, verified_skills, institution, course_name, graduation_year, is_student, cert_pdf_url, bio, recommendation_count, approval_status, rejection_reason, bi, telefone, date_of_birth, gender, bi_front_url, bi_back_url, is_available FROM users WHERE id = ?',
       [req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Utilizador não encontrado' });
