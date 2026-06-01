@@ -834,6 +834,25 @@ app.post('/api/users/:id/bi-scan', uploadBiFields, async (req, res) => {
   }
 });
 
+// Actualizar dados básicos do perfil (cliente ou profissional)
+app.put('/api/users/:id/profile', async (req, res) => {
+  try {
+    const { name, telefone, province } = req.body;
+    await db.query(
+      'UPDATE users SET name = COALESCE(NULLIF(?, \'\'), name), telefone = ?, province = ? WHERE id = ?',
+      [name || null, telefone || null, province || null, req.params.id]
+    );
+    const [rows] = await db.query(
+      'SELECT id, name, email, role, avatar_url, telefone, province, approval_status FROM users WHERE id = ?',
+      [req.params.id]
+    );
+    res.json(rows[0]);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao actualizar perfil' });
+  }
+});
+
 // Upload de foto de perfil (avatar)
 app.post('/api/users/:id/avatar', upload.single('avatar'), async (req, res) => {
   try {
