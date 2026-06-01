@@ -510,12 +510,12 @@ app.put('/api/jobs/:id/hire/:professionalId', async (req, res) => {
     );
 
     // Notificar profissional contratado
-    const [jInfo] = await db.query('SELECT title, client_id FROM jobs WHERE id = ?', [id]);
+    const [jInfo] = await db.query('SELECT category, client_id FROM jobs WHERE id = ?', [id]);
     notify(
       professionalId,
       'HIRED',
       'Foste contratado! 🎉',
-      `O cliente aceitou a tua candidatura para “${jInfo[0]?.title || 'pedido'}”.`,
+      `O cliente aceitou a tua candidatura para “${jInfo[0]?.category || 'pedido'}”.`,
       id
     );
 
@@ -529,7 +529,7 @@ app.put('/api/jobs/:id/hire/:professionalId', async (req, res) => {
         r.professional_id,
         'REJECTED',
         'Candidatura não selecionada',
-        `O cliente escolheu outro profissional para “${jInfo[0]?.title || 'o pedido'}”.`,
+        `O cliente escolheu outro profissional para “${jInfo[0]?.category || 'o pedido'}”.`,
         id
       );
     }
