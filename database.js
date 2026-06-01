@@ -1,8 +1,12 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
 
-// MYSQL_URL set in Railway dashboard → use it (internal network)
-// Locally → fall back to external IP from .env
+// Priority:
+// 1. MYSQL_URL (full connection string)
+// 2. DB_HOST / DB_USER / DB_PASSWORD / DB_NAME / DB_PORT (Railway custom vars)
+// 3. MYSQL_HOST / MYSQL_USER / MYSQL_PASSWORD / MYSQL_DATABASE (local .env)
+// 4. Hardcoded external MySQL fallback
+
 const poolConfig = process.env.MYSQL_URL
   ? {
       uri: process.env.MYSQL_URL,
@@ -10,11 +14,11 @@ const poolConfig = process.env.MYSQL_URL
       connectionLimit: 10,
     }
   : {
-      host: process.env.MYSQL_HOST || '157.173.113.193',
-      port: parseInt(process.env.MYSQL_PORT || '3306', 10),
-      user: process.env.MYSQL_USER || 'startech_start',
-      password: process.env.MYSQL_PASSWORD || '!10Start100',
-      database: process.env.MYSQL_DATABASE || 'startech_fixlink',
+      host:     process.env.DB_HOST     || process.env.MYSQL_HOST     || '157.173.113.193',
+      port: parseInt(process.env.DB_PORT || process.env.MYSQL_PORT    || '3306', 10),
+      user:     process.env.DB_USER     || process.env.MYSQL_USER     || 'startech_start',
+      password: process.env.DB_PASSWORD || process.env.MYSQL_PASSWORD || '!10Start100',
+      database: process.env.DB_NAME     || process.env.MYSQL_DATABASE || 'startech_fixlink',
       waitForConnections: true,
       connectionLimit: 10,
     };
