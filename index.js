@@ -211,7 +211,7 @@ app.post('/api/jobs/direct-hire', upload.single('photo'), async (req, res) => {
     }
 
     // Verificar se o profissional existe e está aprovado
-    const [profRows] = await db.query('SELECT id, approval_status FROM users WHERE id = ? AND role = ?', [professional_id, 'professional']);
+    const [profRows] = await db.query('SELECT id, approval_status FROM users WHERE id = ? AND role = ?', [professional_id, 'PROFESSIONAL']);
     if (!profRows.length) return res.status(404).json({ error: 'Profissional não encontrado' });
     if (profRows[0].approval_status !== 'APPROVED') {
       return res.status(400).json({ error: 'Este profissional ainda não está disponível para pedidos.' });
